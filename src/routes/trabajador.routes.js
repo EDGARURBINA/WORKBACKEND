@@ -7,7 +7,9 @@ import {
   deleteTrabajador,
   permanentDeleteTrabajador,
   getClientesAsignados,
-  getEstadisticasTrabajador
+  getEstadisticasTrabajador,
+  getDashboardTrabajador,  // NUEVO
+  getPagosRecolectados     // NUEVO
 } from '../controllers/trabajador.controller.js';
 
 
@@ -35,5 +37,8 @@ router.get('/:id/clientes',  getClientesAsignados);
 
 // Estadísticas del trabajador
 router.get('/:id/estadisticas', getEstadisticasTrabajador);
+
+router.get('/:id/dashboard', getDashboardTrabajador);      // NUEVO
+router.get('/:id/pagos-recolectados', getPagosRecolectados); // NUEVO
 
 export default router;

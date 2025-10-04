@@ -16,7 +16,7 @@ export const updateStatus = async (req, res) => {
       return res.status(400).json({ message: 'ID de cliente inválido' });
     }
 
-    // Validar que el status sea válido según el modelo
+    // Validar que el status sea válido según el 
     const statusValidos = ['activo', 'moroso', 'bloqueado', 'renovacion'];
     if (!status || !statusValidos.includes(status)) {
       return res.status(400).json({ 

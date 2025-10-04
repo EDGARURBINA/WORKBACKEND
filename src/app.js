@@ -8,14 +8,17 @@ import trabajadorRoutes from "./routes/trabajador.routes.js"
 import dashboardRoutes from "./routes/dashboard.routes.js"
 import moratorioRoutes from "./routes/moratorio.routes.js"
 import tarjetaPagoRoutes from "./routes/tarjetaPago.routes.js"
+import pagosDiariosRoutes from "./routes/pagosDiarios.routes.js"
+import CajaRoutes from "./routes/caja.routes.js"
+import SistemaRoutes from "./routes/sistema.routes.js"
 
 const app = express(); 
 
-// Middlewares
+
 app.use(cors());
 app.use(express.json());
 
-// Routes
+
 app.use("/api/auth", authRoutes);
 app.use("/api/clientes", clienteRoutes);
 app.use("/api/prestamos", prestamoRoutes);
@@ -24,5 +27,9 @@ app.use ("/api/trabajadores", trabajadorRoutes)
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/moratorios', moratorioRoutes);
 app.use('/api/tarjetas-pago', tarjetaPagoRoutes);
+app.use('/api/pagos-diarios', pagosDiariosRoutes);
+app.use('/api/caja', CajaRoutes)
+app.use ('/api/sistema', SistemaRoutes)
+
 
 export default app;

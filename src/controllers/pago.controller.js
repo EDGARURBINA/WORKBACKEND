@@ -2,12 +2,20 @@ import Pago from '../models/Pago.js';
 import Prestamo from '../models/Prestamo.js';
 import Moratorio from '../models/Moratorio.js';
 import Cliente from '../models/Cliente.js';
+import AsignacionDinero from '../models/AsignacionDinero.js';
+import Caja from '../models/Caja.js';
 
 export const registrarAbono = async (req, res) => {
   try {
     const { pagoId, trabajadorId, montoAbonado, observaciones } = req.body;
 
-    // Validaciones básicas
+    // ✅ HACER TRABAJADOR OBLIGATORIO TAMBIÉN
+    if (!trabajadorId) {
+      return res.status(400).json({ 
+        message: 'El trabajadorId es obligatorio. Todos los cobros deben registrarse con el trabajador que los realizó.' 
+      });
+    }
+
     if (!montoAbonado || montoAbonado <= 0) {
       return res.status(400).json({ message: 'El monto del abono debe ser mayor a 0' });
     }
@@ -22,7 +30,26 @@ export const registrarAbono = async (req, res) => {
       return res.status(400).json({ message: 'Este pago ya está completo' });
     }
 
-    // 🔧 CORREGIDO: Consultar moratorio APLICADO manualmente (NO auto-crear)
+    // Validar que el trabajador tenga asignación activa
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+    const finDia = new Date(hoy);
+    finDia.setHours(23, 59, 59, 999);
+
+    const asignacionActiva = await AsignacionDinero.findOne({
+      trabajador: trabajadorId,
+      fecha: { $gte: hoy, $lte: finDia },
+      status: { $in: ['pendiente', 'parcial'] }
+    });
+
+    if (!asignacionActiva) {
+      return res.status(400).json({ 
+        message: 'El trabajador no tiene asignación de caja activa para registrar cobros.',
+        accion: 'El trabajador debe tener dinero asignado del día para poder cobrar'
+      });
+    }
+
+    // Tu lógica existente de moratorios...
     const moratorioAplicado = await Moratorio.findOne({ 
       pago: pagoId, 
       activo: true 
@@ -30,26 +57,16 @@ export const registrarAbono = async (req, res) => {
 
     let moratorioEfectivo = 0;
     
-    // Solo usar moratorio si fue aplicado por admin Y no fue quitado
     if (moratorioAplicado && !moratorioAplicado.adminAcciones?.noCobra) {
       moratorioEfectivo = moratorioAplicado.monto;
-      // Sincronizar con el pago
       pago.diasMoratorio = moratorioAplicado.dias;
       pago.montoMoratorio = moratorioAplicado.monto;
     } else {
-      // 🔧 CORREGIDO: Si no hay moratorio aplicado o fue quitado, limpiar el pago
       pago.diasMoratorio = 0;
       pago.montoMoratorio = 0;
     }
 
-    // 🔧 CORREGIDO: Validar con moratorio efectivo (solo los aplicados por admin)
     const saldoTotal = pago.saldoPendiente + moratorioEfectivo;
-    
-    console.log(`🔍 DEBUG - Pago ID: ${pagoId}`);
-    console.log(`🔍 Moratorio aplicado por admin: ${!!moratorioAplicado}`);
-    console.log(`🔍 Moratorio fue quitado: ${moratorioAplicado?.adminAcciones?.noCobra || false}`);
-    console.log(`🔍 Moratorio efectivo: $${moratorioEfectivo}`);
-    console.log(`🔍 Saldo total: $${saldoTotal}`);
     
     if (montoAbonado > saldoTotal) {
       return res.status(400).json({ 
@@ -57,33 +74,39 @@ export const registrarAbono = async (req, res) => {
       });
     }
 
-    const fechaActual = new Date(); 
+    const fechaActual = new Date();
 
-    // ❌ ELIMINADO: Ya no auto-crear moratorios aquí
-    // if (!pago.diasMoratorio) { ... }
+    // ✅ REGISTRAR EN CAJA (OBLIGATORIO)
+    try {
+      await asignacionActiva.registrarCobro(
+        pagoId,
+        parseFloat(montoAbonado),
+        pago.prestamo.cliente
+      );
+      
+      console.log(`💰 Cobro de $${montoAbonado} registrado en caja para trabajador ${trabajadorId}`);
+    } catch (error) {
+      console.error('❌ Error al registrar cobro en caja:', error);
+      throw new Error('Error al procesar el cobro en la caja');
+    }
 
-    // Aplicar el abono
+    // Tu lógica existente de aplicar el abono...
     let montoRestante = montoAbonado;
     let abonoCapital = 0;
     let abonoMoratorio = 0;
 
-    // 🔧 CORREGIDO: Solo aplicar a moratorio si es efectivo (aplicado por admin)
     if (moratorioEfectivo > 0) {
       abonoMoratorio = Math.min(montoRestante, moratorioEfectivo);
       
-      // Actualizar moratorio en la colección
       const nuevoMontoMoratorio = moratorioAplicado.monto - abonoMoratorio;
       await Moratorio.findByIdAndUpdate(moratorioAplicado._id, {
         monto: nuevoMontoMoratorio
       });
       
-      // Sincronizar con el pago
       pago.montoMoratorio = nuevoMontoMoratorio;
-      
       montoRestante -= abonoMoratorio;
     }
 
-    // Luego aplicar al capital
     if (montoRestante > 0) {
       abonoCapital = Math.min(montoRestante, pago.saldoPendiente);
       pago.montoAbonado += abonoCapital;
@@ -97,7 +120,6 @@ export const registrarAbono = async (req, res) => {
       observaciones: observaciones || `Abono: $${abonoCapital.toFixed(2)} capital${abonoMoratorio > 0 ? `, $${abonoMoratorio.toFixed(2)} moratorio` : ''}`
     });
 
-    // Actualizar fechas y trabajador
     if (!pago.fechaPago || pago.estadoPago === 'pendiente') {
       pago.fechaPago = fechaActual;
     }
@@ -107,10 +129,9 @@ export const registrarAbono = async (req, res) => {
       pago.observaciones = observaciones;
     }
 
-    // El middleware del modelo se encarga de calcular estadoPago, pagado, etc.
     await pago.save();
 
-    // Lógica para incrementar línea de crédito en el pago 11
+    // Tu lógica existente de línea de crédito...
     if (pago.numeroPago >= pago.prestamo.pagoMinimoRenovacion && 
         pago.pagado && 
         !pago.prestamo.puedeRenovar) {
@@ -124,18 +145,13 @@ export const registrarAbono = async (req, res) => {
         await Cliente.findByIdAndUpdate(pago.prestamo.cliente, {
           lineaCredito: nuevaLineaCredito
         });
-
-        console.log(`✅ Línea de crédito incrementada para cliente ${cliente.nombre}: $${cliente.lineaCredito} -> $${nuevaLineaCredito}`);
       }
 
       await Prestamo.findByIdAndUpdate(pago.prestamo._id, {
         puedeRenovar: true
       });
-
-      console.log(`✅ Préstamo ${pago.prestamo._id} ahora puede renovar (pago #${pago.numeroPago} completado)`);
     }
 
-    // Respuesta detallada
     const response = {
       message: pago.pagado 
         ? 'Pago completado correctamente' 
@@ -146,18 +162,14 @@ export const registrarAbono = async (req, res) => {
         abonoCapital,
         abonoMoratorio,
         nuevoEstado: pago.estadoPago
+      },
+      caja: {
+        registrado: true,
+        mensaje: 'Cobro registrado en tu asignación de caja',
+        montoRecaudadoHoy: asignacionActiva.montoRecaudado,
+        asignacionId: asignacionActiva._id
       }
     };
-
-    // Agregar información de línea de crédito si se incrementó
-    if (pago.numeroPago >= pago.prestamo.pagoMinimoRenovacion && pago.pagado) {
-      const clienteActualizado = await Cliente.findById(pago.prestamo.cliente);
-      response.lineaCreditoActualizada = {
-        incremento: pago.prestamo.incrementoLineaCredito || 1000,
-        nuevaLineaCredito: clienteActualizado.lineaCredito,
-        puedeRenovar: true
-      };
-    }
 
     res.json(response);
   } catch (error) {
@@ -165,9 +177,7 @@ export const registrarAbono = async (req, res) => {
     res.status(400).json({ message: error.message });
   }
 };
-
-
-// Obtener pagos pendientes (incluyendo parciales)
+// Obtener pagos pendientes (sin cambios)
 export const getPagosPendientes = async (req, res) => {
   try {
     const pagos = await Pago.find({ 
@@ -192,15 +202,13 @@ export const getPagosPendientes = async (req, res) => {
   }
 };
 
-
-// 🔧 CORREGIDO: getPagos sin auto-calcular moratorios
+// Tu método getPagos sin cambios importantes
 export const getPagos = async (req, res) => {
   try {
     const hoy = new Date();
     const inicioHoy = new Date(hoy.setHours(0, 0, 0, 0));
     const finHoy = new Date(hoy.setHours(23, 59, 59, 999));
 
-    // Obtener pagos pendientes y parciales
     const pagosPendientes = await Pago.find({ 
       $or: [
         { pagado: false },
@@ -218,7 +226,6 @@ export const getPagos = async (req, res) => {
       .populate('historialAbonos.trabajador', 'nombreCompleto')
       .sort({ fechaVencimiento: 1 });
 
-    // Obtener pagos completados HOY
     const pagosCompletadosHoy = await Pago.find({
       pagado: true,
       estadoPago: 'completo',
@@ -238,13 +245,10 @@ export const getPagos = async (req, res) => {
       .populate('historialAbonos.trabajador', 'nombreCompleto')
       .sort({ fechaPago: -1 });
 
-    // Combinar ambos arrays
     const todosPagos = [...pagosPendientes, ...pagosCompletadosHoy];
 
-    // 🔧 CORREGIDO: Solo usar moratorios aplicados por admin
     const pagosConMoratorios = await Promise.all(
       todosPagos.map(async (pago) => {
-        // Consultar moratorio aplicado manualmente
         const moratorioAplicado = await Moratorio.findOne({ 
           pago: pago._id, 
           activo: true 
@@ -308,7 +312,6 @@ export const getHistorialAbonos = async (req, res) => {
       return res.status(404).json({ message: 'Pago no encontrado' });
     }
 
-    // 🔧 CORREGIDO: Incluir información de moratorio desde la colección
     const moratorio = await Moratorio.findOne({ pago: pagoId, activo: true });
 
     res.json({
@@ -338,3 +341,84 @@ export const getHistorialAbonos = async (req, res) => {
 
 // Mantener el método original por compatibilidad
 export const registrarPago = registrarAbono;
+
+// ========== NUEVOS MÉTODOS PARA INTEGRACIÓN CON CAJA ==========
+
+// Obtener resumen de cobros del día para un trabajador
+export const getResumenCobrosDiaTrabajador = async (req, res) => {
+  try {
+    const { trabajadorId } = req.params;
+    const { fecha } = req.query;
+    
+    const fechaBusqueda = fecha ? new Date(fecha) : new Date();
+    const inicioDia = new Date(fechaBusqueda);
+    inicioDia.setHours(0, 0, 0, 0);
+    const finDia = new Date(fechaBusqueda);
+    finDia.setHours(23, 59, 59, 999);
+
+    // Buscar todos los pagos cobrados por el trabajador hoy
+    const pagosDelDia = await Pago.find({
+      trabajadorCobro: trabajadorId,
+      'historialAbonos.fecha': { $gte: inicioDia, $lte: finDia }
+    }).populate({
+      path: 'prestamo',
+      populate: {
+        path: 'cliente',
+        select: 'nombre telefono'
+      }
+    });
+
+    // Calcular total cobrado
+    let totalCobrado = 0;
+    const cobrosDetalle = [];
+
+    for (const pago of pagosDelDia) {
+      const abonosHoy = pago.historialAbonos.filter(abono => {
+        const fechaAbono = new Date(abono.fecha);
+        return fechaAbono >= inicioDia && fechaAbono <= finDia && 
+               abono.trabajador?.toString() === trabajadorId;
+      });
+
+      for (const abono of abonosHoy) {
+        totalCobrado += abono.monto;
+        cobrosDetalle.push({
+          cliente: pago.prestamo.cliente.nombre,
+          numeroPago: pago.numeroPago,
+          monto: abono.monto,
+          hora: abono.fecha,
+          tipoPrestamo: pago.tipoPago || 'semanal'
+        });
+      }
+    }
+
+    // Buscar asignación de caja si existe
+    const asignacion = await AsignacionDinero.findOne({
+      trabajador: trabajadorId,
+      fecha: { $gte: inicioDia, $lte: finDia }
+    });
+
+    res.json({
+      fecha: fechaBusqueda,
+      trabajador: trabajadorId,
+      resumen: {
+        totalCobrado,
+        cantidadCobros: cobrosDetalle.length,
+        cobrosDetalle: cobrosDetalle.sort((a, b) => new Date(b.hora) - new Date(a.hora))
+      },
+      caja: asignacion ? {
+        tieneAsignacion: true,
+        montoAsignado: asignacion.montoAsignado,
+        montoRecaudado: asignacion.montoRecaudado,
+        coincide: Math.abs(totalCobrado - asignacion.montoRecaudado) < 1
+      } : {
+        tieneAsignacion: false,
+        mensaje: 'Sin asignación de caja para hoy'
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      message: 'Error al obtener resumen de cobros',
+      error: error.message 
+    });
+  }
+};

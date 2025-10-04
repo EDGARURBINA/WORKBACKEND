@@ -11,14 +11,20 @@ const tarjetaPagoSchema = new mongoose.Schema({
     type: Date,
     default: Date.now
   },
+
+  tipoTarjeta: {
+  type: String,
+  enum: ['semanal', 'diario'],
+  required: true
+},
   // Información del grid de pagos (15 espacios)
-  gridPagos: [{
-    posicion: {
-      type: Number,
-      required: true,
-      min: 1,
-      max: 15
-    },
+gridPagos: [{
+  posicion: {
+    type: Number,
+    required: true,
+    min: 1,
+    max: 30  // ✅ CAMBIAR DE 15 A 30
+  },
     numeroPago: {
       type: Number,
       min: 1
@@ -38,15 +44,32 @@ const tarjetaPagoSchema = new mongoose.Schema({
       default: 0
     },
     estadoPago: {
-      type: String,
-      enum: ['pendiente', 'parcial', 'completo', 'extra'],
-      default: 'pendiente'
-    },
-    esEspacio: {
+    type: String,
+    enum: ['pendiente', 'parcial', 'completo', 'extra', 'vencido'], // ✅ AGREGAR 'vencido'
+    default: 'pendiente'
+  },
+     esEspacio: {
+    type: Boolean,
+    default: false
+  },
+  // ⭐ AGREGAR METADATA:
+  metadata: {
+    esDiaHabil: {
       type: Boolean,
-      default: false // true para posiciones 13, 14, 15
+      default: true
+    },
+    diaSemana: {
+      type: Number,
+      min: 0,
+      max: 6
+    },
+    puedeRenovar: {
+      type: Boolean,
+      default: false
     }
-  }],
+  }
+}],
+  
   // Estado de la tarjeta
   impresa: {
     type: Boolean,
@@ -72,49 +95,108 @@ const tarjetaPagoSchema = new mongoose.Schema({
       trim: true
     }
   }],
-  // Configuración de la tarjeta
-  configuracion: {
-    mostrarTelefono: {
-      type: Boolean,
-      default: true
-    },
-    mostrarDireccion: {
-      type: Boolean,
-      default: true
-    },
-    incluirQR: {
-      type: Boolean,
-      default: false
-    },
-    colorTema: {
-      type: String,
-      default: '#2563eb'
+  // 3. ⭐ ACTUALIZAR configuracion:
+configuracion: {
+  tipoPrestamo: {  // ⭐ AGREGAR ESTE CAMPO
+    type: String,
+    enum: ['semanal', 'diario'],
+    required: true
+  },
+  mostrarTelefono: {
+    type: Boolean,
+    default: true
+  },
+  mostrarDireccion: {
+    type: Boolean,
+    default: true
+  },
+  incluirQR: {
+    type: Boolean,
+    default: function() {
+      return this.tipoPrestamo === 'diario'; // ⭐ QR por defecto para diarios
     }
   },
-  // Estadísticas calculadas
-  estadisticas: {
-    pagosPagados: {
-      type: Number,
-      default: 0
+  colorTema: {
+    type: String,
+    default: function() {
+      return this.tipoPrestamo === 'semanal' ? '#2563eb' : '#16a34a'; // ⭐ COLORES DIFERENTES
+    }
+  },
+   configuracionSemanal: {
+    mostrarProgreso: {
+      type: Boolean,
+      default: true
     },
-    pagosParciales: {
-      type: Number,
-      default: 0
+    destacarRenovacion: {
+      type: Boolean,
+      default: true
+    }
+  },
+  configuracionDiaria: {
+    mostrarCalendario: {
+      type: Boolean,
+      default: true
     },
-    totalAbonado: {
-      type: Number,
-      default: 0
+    destacarFinDeSemana: {
+      type: Boolean,
+      default: true
     },
-    saldoPendiente: {
-      type: Number,
-      default: 0
-    },
-    progreso: {
-      type: Number,
-      default: 0,
-      min: 0,
-      max: 100
-    },
+    mostrarDiaRenovacion: {
+      type: Boolean,
+      default: true
+    }
+  }
+  },
+  
+// 4. ⭐ ACTUALIZAR estadisticas:
+estadisticas: {
+  totalPeriodos: {  // ⭐ AGREGAR
+    type: Number,
+    default: 0
+  },
+  pagosPagados: {
+    type: Number,
+    default: 0
+  },
+  pagosParciales: {
+    type: Number,
+    default: 0
+  },
+  pagosVencidos: {  // ⭐ AGREGAR
+    type: Number,
+    default: 0
+  },
+  totalAbonado: {
+    type: Number,
+    default: 0
+  },
+  saldoPendiente: {
+    type: Number,
+    default: 0
+  },
+  progreso: {
+    type: Number,
+    default: 0,
+    min: 0,
+    max: 100
+  },
+  // ⭐ AGREGAR ESTADÍSTICAS ESPECÍFICAS:
+  diasConsecutivosPagados: {
+    type: Number,
+    default: 0
+  },
+  semanasConsecutivasPagadas: {
+    type: Number,
+    default: 0
+  },
+  puedeRenovarEn: {
+    type: Number,
+    default: null
+  },
+  ultimaActualizacion: {
+    type: Date,
+    default: Date.now
+  },
     ultimaActualizacion: {
       type: Date,
       default: Date.now

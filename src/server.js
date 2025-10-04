@@ -1,5 +1,5 @@
 import dotenv from 'dotenv';
-import app from './app.js';
+import app from "./app.js";
 import mongoose from 'mongoose';
 import { createRoles, createAdmin } from './libs/inicialSetup.js';
 
