@@ -16,11 +16,18 @@ const clienteSchema = new mongoose.Schema({
     required: true,
     trim: true
   },
+  ubicacion: {
+    type : String, 
+     trim: true
+
+},
+
   status: {
     type: String,
     enum: ['activo', 'moroso', 'bloqueado', 'renovacion'],
     default: 'activo'
   },
+
   semanasConsecutivasSinPago: {
     type: Number,
     default: 0

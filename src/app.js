@@ -31,5 +31,4 @@ app.use('/api/pagos-diarios', pagosDiariosRoutes);
 app.use('/api/caja', CajaRoutes)
 app.use ('/api/sistema', SistemaRoutes)
 
-
 export default app;

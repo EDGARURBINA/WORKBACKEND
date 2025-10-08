@@ -164,28 +164,46 @@ pagoSchema.index({ pagado: 1 });
 pagoSchema.index({ tipoPago: 1 });
 pagoSchema.index({ estadoPago: 1 });
 
-// Middleware existente (ya lo tienes correcto)
+
+
+// ✅ MIDDLEWARE MEJORADO CON REDONDEO A 2 DECIMALES
 pagoSchema.pre('save', function(next) {
+  // ✅ REDONDEAR TODOS LOS MONTOS A 2 DECIMALES ANTES DE CUALQUIER CÁLCULO
+  this.monto = Math.round(this.monto * 100) / 100;
+  this.montoAbonado = Math.round(this.montoAbonado * 100) / 100;
+  this.montoMoratorio = Math.round(this.montoMoratorio * 100) / 100;
+  
+  // Redondear abonos en historial
+  if (this.historialAbonos && this.historialAbonos.length > 0) {
+    this.historialAbonos.forEach(abono => {
+      abono.monto = Math.round(abono.monto * 100) / 100;
+    });
+  }
+  
+  // ✅ CALCULAR SALDO CON REDONDEO
   if (this.isModified('montoAbonado') || this.isModified('monto')) {
-    this.saldoPendiente = this.monto - this.montoAbonado;
+    this.saldoPendiente = Math.round((this.monto - this.montoAbonado) * 100) / 100;
     
+    // ✅ USAR TOLERANCIA DE 0.01 PARA COMPARACIONES
     if (this.montoAbonado === 0) {
       this.estadoPago = 'pendiente';
       this.pagado = false;
       this.esParcial = false;
-    } else if (this.saldoPendiente > 0) {
+    } else if (this.saldoPendiente > 0.01) { // ✅ Tolerancia de 1 centavo
       this.estadoPago = 'parcial';
       this.pagado = false;
       this.esParcial = true;
     } else {
+      // ✅ Si saldoPendiente es menor a 0.01, considerarlo pagado completo
       this.estadoPago = 'completo';
       this.pagado = true;
       this.esParcial = false;
+      this.saldoPendiente = 0; // ✅ Forzar a 0 para evitar residuos
       this.fechaPago = this.fechaPago || new Date();
     }
   }
   
-  // ⭐ AGREGAR CÁLCULO DE MORATORIOS
+  // ✅ CALCULAR MORATORIOS
   if (!this.pagado && this.fechaVencimiento < new Date()) {
     this.calcularMoratorio();
   }
@@ -194,6 +212,7 @@ pagoSchema.pre('save', function(next) {
 });
 
 // ⭐ MÉTODOS QUE TE FALTAN
+// ✅ TAMBIÉN ACTUALIZAR EL MÉTODO calcularMoratorio
 pagoSchema.methods.calcularMoratorio = function() {
   const ahora = new Date();
   const fechaVencimiento = new Date(this.fechaVencimiento);
@@ -209,7 +228,10 @@ pagoSchema.methods.calcularMoratorio = function() {
   if (diasAtraso > 0) {
     this.diasMoratorio = diasAtraso;
     const porcentajeDiario = this.configuracionMoratorio?.porcentajeDiario || 0.5;
-    this.montoMoratorio = this.monto * (porcentajeDiario / 100) * diasAtraso;
+    
+    // ✅ REDONDEAR MORATORIO A 2 DECIMALES
+    const moratorioCalculado = this.monto * (porcentajeDiario / 100) * diasAtraso;
+    this.montoMoratorio = Math.round(moratorioCalculado * 100) / 100;
   } else {
     this.diasMoratorio = 0;
     this.montoMoratorio = 0;

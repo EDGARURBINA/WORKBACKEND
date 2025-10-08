@@ -69,13 +69,13 @@ export const generarTarjetaPagoPDF = async (req, res) => {
   }
 };
 
-// ✅ FUNCIÓN PARA PRÉSTAMOS DIARIOS
+// ✅ FUNCIÓN PARA PRÉSTAMOS DIARIOS (AMBAS CON UBICACIÓN)
 async function generarDosTarjetasDiarias(doc, prestamo, pagos) {
   const pageWidth = doc.page.width;
   const margin = 30;
   const contentWidth = pageWidth - (margin * 2);
   
-  // PRIMERA TARJETA DIARIA (COMPLETA)
+  // PRIMERA TARJETA DIARIA
   let yInicial = 40;
   await generarTarjetaDiaria(doc, prestamo, pagos, yInicial, true, "TARJETA DIARIA COMPLETA");
   
@@ -96,12 +96,12 @@ async function generarDosTarjetasDiarias(doc, prestamo, pagos) {
              width: contentWidth 
            });
   
-  // SEGUNDA TARJETA DIARIA (EN BLANCO)
+  // SEGUNDA TARJETA DIARIA (TAMBIÉN CON UBICACIÓN) ✅ Cambiado a true
   const ySegunda = ySeparador + 25;
-  await generarTarjetaDiaria(doc, prestamo, pagos, ySegunda, false, "TARJETA DIARIA PARA RELLENAR");
+  await generarTarjetaDiaria(doc, prestamo, pagos, ySegunda, true, "TARJETA DIARIA PARA RELLENAR");
 }
 
-// ✅ FUNCIÓN ESPECÍFICA PARA TARJETAS DIARIAS
+/// ✅ FUNCIÓN ESPECÍFICA PARA TARJETAS DIARIAS (SOLO NÚMEROS, UBICACIÓN A LA DERECHA)
 async function generarTarjetaDiaria(doc, prestamo, pagos, yInicial, conDatos, titulo) {
   const pageWidth = doc.page.width;
   const margin = 30;
@@ -109,7 +109,7 @@ async function generarTarjetaDiaria(doc, prestamo, pagos, yInicial, conDatos, ti
 
   // ENCABEZADO
   doc.fontSize(16)
-     .fillColor('#16a34a') // Verde para diarios
+     .fillColor('#16a34a')
      .font('Helvetica-Bold')
      .text('PRESTAMOS TU DIARIO', margin, yInicial, { 
        align: 'center',
@@ -130,7 +130,6 @@ async function generarTarjetaDiaria(doc, prestamo, pagos, yInicial, conDatos, ti
      .lineTo(pageWidth - margin - 50, yInicial + 30)
      .stroke();
 
-  // INFORMACIÓN DEL CLIENTE
   let yPos = yInicial + 45;
   
   // PRIMERA FILA
@@ -177,41 +176,20 @@ async function generarTarjetaDiaria(doc, prestamo, pagos, yInicial, conDatos, ti
 
   yPos += 18;
 
-  // CUARTA FILA - INFORMACIÓN ESPECÍFICA DIARIA
+  // ✅ CUARTA FILA CON UBICACIÓN A LA DERECHA
+  const yFilaContrato = yPos;
+
+  // COLUMNA IZQUIERDA: Labels
   doc.fontSize(8)
      .font('Helvetica-Bold')
-     .text('CONTRATO:', margin, yPos)
-     .text('MONTO:', margin + 150, yPos)
-     .text('DÍAS:', margin + 270, yPos)
-     .text('DIARIO:', margin + 370, yPos);
-  yPos += 10;
-
-  // ✅ NUEVO: UBICACIÓN DE 3 PALABRAS
-  yPos += 18;
-  
-  doc.fontSize(8)
-     .fillColor('#000')
-     .font('Helvetica-Bold')
-     .text('UBICACIÓN (3 PALABRAS):', margin, yPos);
+     .text('CONTRATO:', margin, yFilaContrato)
+     .text('MONTO:', margin + 85, yFilaContrato)
+     .text('DÍAS:', margin + 165, yFilaContrato)
+     .text('DIARIO:', margin + 230, yFilaContrato);
 
   yPos += 10;
-  
-  // Rectángulo para rellenar manualmente
-  doc.rect(margin, yPos, contentWidth - 100, 15)
-     .strokeColor('#999999')
-     .lineWidth(0.5)
-     .stroke();
-  
-  // Placeholder ////////////////////////////////////////////////////////////////////////
-  doc.fontSize(7)
-     .fillColor('#999999')
-     .font('Helvetica-Oblique')
-     .text('', margin + 5, yPos + 4);
-  
-  yPos += 25;
 
-
-  // ✅ USAR CAMPO CORRECTO PARA DIARIOS
+  // COLUMNA IZQUIERDA: Valores
   const montoDiario = prestamo.montoDiario || 0;
   doc.fontSize(8)
      .font('Helvetica')
@@ -220,13 +198,39 @@ async function generarTarjetaDiaria(doc, prestamo, pagos, yInicial, conDatos, ti
      .text(prestamo.numeroContrato, margin, yPos)
      .fillColor('#000')
      .font('Helvetica')
-     .text(`$ ${prestamo.monto.toLocaleString()}`, margin + 150, yPos)
-     .text(prestamo.plazo.toString(), margin + 270, yPos)
-     .text(`$ ${montoDiario.toFixed(2)}`, margin + 370, yPos);
+     .text(`$ ${prestamo.monto.toLocaleString()}`, margin + 85, yPos)
+     .text(prestamo.plazo.toString(), margin + 165, yPos)
+     .text(`$ ${montoDiario.toFixed(2)}`, margin + 230, yPos);
 
-  yPos += 25;
+  // ✅ COLUMNA DERECHA: UBICACIÓN
+  const xUbicacion = margin + 305;
+  const anchoUbicacion = pageWidth - margin - xUbicacion - 10;
+  const alturaUbicacion = 22;
 
-  // GRID DE PAGOS DIARIOS (22 días en 2 filas)
+  doc.fontSize(7)
+     .fillColor('#000')
+     .font('Helvetica-Bold')
+     .text('UBICACIÓN:', xUbicacion, yFilaContrato);
+
+  doc.rect(xUbicacion, yFilaContrato + 9, anchoUbicacion, alturaUbicacion)
+     .strokeColor('#16a34a')
+     .lineWidth(0.8)
+     .stroke();
+
+  if (prestamo.cliente.ubicacion) {
+    doc.fontSize(5)
+       .fillColor('#15803d')
+       .font('Helvetica')
+       .text(prestamo.cliente.ubicacion, xUbicacion + 2, yFilaContrato + 14, {
+         width: anchoUbicacion - 4,
+         ellipsis: true,
+         lineBreak: false
+       });
+  }
+
+  yPos += 30;
+
+  // ✅ GRID DE PAGOS DIARIOS - SOLO NÚMEROS
   const inicioGrid = yPos;
   const diasPorFila = 11;
   const anchoCelda = contentWidth / diasPorFila;
@@ -244,41 +248,18 @@ async function generarTarjetaDiaria(doc, prestamo, pagos, yInicial, conDatos, ti
        .stroke();
   }
 
+  // ✅ SOLO NÚMEROS (sin fechas ni montos)
   for (let i = 0; i < diasPorFila; i++) {
     const numeroDia = i + 1;
     const x = margin + (i * anchoCelda);
-    const pago = pagos.find(p => p.numeroPago === numeroDia);
 
-    if (conDatos && pago && pago.pagado) {
-      doc.rect(x + 1, inicioGrid + 1, anchoCelda - 2, altoCelda - 2)
-         .fillAndStroke('#e8f5e8', '#000');
-    }
-
-    doc.fontSize(7)
+    doc.fontSize(8)
        .fillColor('#000')
        .font('Helvetica-Bold')
-       .text(numeroDia.toString(), x + 2, inicioGrid + 2, {
+       .text(numeroDia.toString(), x + 2, inicioGrid + 8, {
          width: anchoCelda - 4,
          align: 'center'
        });
-
-    if (conDatos && pago) {
-      const fecha = new Date(pago.fechaVencimiento);
-      const fechaTexto = `${fecha.getDate().toString().padStart(2, '0')}/${(fecha.getMonth() + 1).toString().padStart(2, '0')}`;
-      
-      doc.fontSize(5)
-         .font('Helvetica')
-         .text(fechaTexto, x + 2, inicioGrid + 11, {
-           width: anchoCelda - 4,
-           align: 'center'
-         });
-
-      doc.fontSize(5)
-         .text(`$${pago.monto.toFixed(0)}`, x + 2, inicioGrid + 18, {
-           width: anchoCelda - 4,
-           align: 'center'
-         });
-    }
   }
 
   // SEGUNDA FILA (días 12-22)
@@ -294,43 +275,19 @@ async function generarTarjetaDiaria(doc, prestamo, pagos, yInicial, conDatos, ti
        .stroke();
   }
 
+  // ✅ SOLO NÚMEROS (días 12-22)
   for (let i = 0; i < diasPorFila; i++) {
     const numeroDia = i + 12;
     const x = margin + (i * anchoCelda);
     
     if (numeroDia <= 22) {
-      const pago = pagos.find(p => p.numeroPago === numeroDia);
-
-      if (conDatos && pago && pago.pagado) {
-        doc.rect(x + 1, ySegundaFila + 1, anchoCelda - 2, altoCelda - 2)
-           .fillAndStroke('#e8f5e8', '#000');
-      }
-
-      doc.fontSize(7)
+      doc.fontSize(8)
          .fillColor('#000')
          .font('Helvetica-Bold')
-         .text(numeroDia.toString(), x + 2, ySegundaFila + 2, {
+         .text(numeroDia.toString(), x + 2, ySegundaFila + 8, {
            width: anchoCelda - 4,
            align: 'center'
          });
-
-      if (conDatos && pago) {
-        const fecha = new Date(pago.fechaVencimiento);
-        const fechaTexto = `${fecha.getDate().toString().padStart(2, '0')}/${(fecha.getMonth() + 1).toString().padStart(2, '0')}`;
-        
-        doc.fontSize(5)
-           .font('Helvetica')
-           .text(fechaTexto, x + 2, ySegundaFila + 11, {
-             width: anchoCelda - 4,
-             align: 'center'
-           });
-
-        doc.fontSize(5)
-           .text(`$${pago.monto.toFixed(0)}`, x + 2, ySegundaFila + 18, {
-             width: anchoCelda - 4,
-             align: 'center'
-           });
-      }
     }
   }
 
@@ -349,7 +306,7 @@ async function generarTarjetaDiaria(doc, prestamo, pagos, yInicial, conDatos, ti
   doc.fontSize(7)
      .text('PAGO', margin, yPos);
 
-  // RESUMEN (SOLO EN TARJETA COMPLETA)
+  // RESUMEN (OPCIONAL)
   if (conDatos) {
     yPos += 20;
     
@@ -400,12 +357,12 @@ async function generarDosTarjetas(doc, prestamo, pagos) {
              width: contentWidth 
            });
   
-  // SEGUNDA TARJETA (EN BLANCO)
+  // SEGUNDA TARJETA (TAMBIÉN CON UBICACIÓN) ✅ Cambiado de false a true
   const ySegunda = ySeparador + 25;
-  await generarTarjeta(doc, prestamo, pagos, ySegunda, false, "TARJETA PARA RELLENAR");
+  await generarTarjeta(doc, prestamo, pagos, ySegunda, true, "TARJETA PARA RELLENAR");
 }
 
-// ✅ FUNCIÓN PARA TARJETA SEMANAL (CORREGIDA)
+// ✅ FUNCIÓN PARA TARJETA SEMANAL (SOLO NÚMEROS EN GRID)
 async function generarTarjeta(doc, prestamo, pagos, yInicial, conDatos, titulo) {
   const pageWidth = doc.page.width;
   const margin = 30;
@@ -436,7 +393,7 @@ async function generarTarjeta(doc, prestamo, pagos, yInicial, conDatos, titulo) 
 
   let yPos = yInicial + 45;
   
-  // INFORMACIÓN DEL CLIENTE (igual que antes)
+  // INFORMACIÓN DEL CLIENTE
   doc.fontSize(8)
      .fillColor('#000')
      .font('Helvetica-Bold')
@@ -477,37 +434,20 @@ async function generarTarjeta(doc, prestamo, pagos, yInicial, conDatos, titulo) 
 
   yPos += 18;
 
+  const yFilaContrato = yPos;
+
+  // COLUMNA IZQUIERDA: Labels
   doc.fontSize(8)
+     .fillColor('#000')
      .font('Helvetica-Bold')
-     .text('CONTRATO:', margin, yPos)
-     .text('MONTO:', margin + 150, yPos)
-     .text('PLAZO:', margin + 270, yPos)
-     .text('ABONO:', margin + 370, yPos);
+     .text('CONTRATO:', margin, yFilaContrato)
+     .text('MONTO:', margin + 90, yFilaContrato)
+     .text('PLAZO:', margin + 180, yFilaContrato)
+     .text('ABONO:', margin + 250, yFilaContrato);
 
- yPos += 15; // Reducido de 18
+  yPos += 10;
 
-doc.fontSize(7) // Reducido de 8
-   .fillColor('#000')
-   .font('Helvetica-Bold')
-   .text('UBICACIÓN (3 PALABRAS):', margin, yPos);
-
-// Rectángulo en la MISMA línea, a la derecha del texto
-doc.rect(margin + 160, yPos - 2, contentWidth - 260, 10)
-   .strokeColor('#cccccc')
-   .lineWidth(0.5)
-   .stroke();
-
-// Placeholder DENTRO del rectángulo pero más pequeño
-doc.fontSize(6)
-   .fillColor('#cccccc')
-   .font('Helvetica-Oblique')
-   .text('', margin + 165, yPos);
-
-yPos += 15; // Reducido de 20
-
-
-
-  // ✅ VERIFICAR QUE EXISTE ANTES DE USAR
+  // COLUMNA IZQUIERDA: Valores
   const montoSemanal = prestamo.montoSemanal || 0;
   doc.fontSize(8)
      .font('Helvetica')
@@ -516,21 +456,49 @@ yPos += 15; // Reducido de 20
      .text(prestamo.numeroContrato, margin, yPos)
      .fillColor('#000')
      .font('Helvetica')
-     .text(`$ ${prestamo.monto.toLocaleString()}`, margin + 150, yPos)
-     .text('12', margin + 270, yPos)
-     .text(`$ ${montoSemanal.toFixed(2)}`, margin + 370, yPos);
+     .text(`$ ${prestamo.monto.toLocaleString()}`, margin + 90, yPos)
+     .text('12', margin + 180, yPos)
+     .text(`$ ${montoSemanal.toFixed(2)}`, margin + 250, yPos);
 
-  yPos += 25;
+  // ✅ COLUMNA DERECHA: UBICACIÓN
+  const xUbicacion = margin + 330;
+  const anchoUbicacion = pageWidth - margin - xUbicacion - 10;
+  const alturaUbicacion = 22;
 
-  // GRID DE PAGOS SEMANALES (resto del código igual...)
+  doc.fontSize(7)
+     .fillColor('#000')
+     .font('Helvetica-Bold')
+     .text('UBICACIÓN:', xUbicacion, yFilaContrato);
+
+  doc.rect(xUbicacion, yFilaContrato + 9, anchoUbicacion, alturaUbicacion)
+     .strokeColor('#2563eb')
+     .lineWidth(0.8)
+     .stroke();
+
+  if (prestamo.cliente.ubicacion) {
+    doc.fontSize(5)
+       .fillColor('#1e40af')
+       .font('Helvetica')
+       .text(prestamo.cliente.ubicacion, xUbicacion + 2, yFilaContrato + 14, {
+         width: anchoUbicacion - 4,
+         ellipsis: true,
+         lineBreak: false
+       });
+  }
+
+  yPos += 30;
+
+  // ✅ GRID DE PAGOS SEMANALES - SOLO NÚMEROS
   const inicioGrid = yPos;
   const anchoCelda = contentWidth / 13;
   const altoCelda = 30;
 
+  // Primera fila (números 1-13)
   doc.rect(margin, inicioGrid, contentWidth, altoCelda)
      .strokeColor('#000')
      .stroke();
 
+  // Líneas verticales
   for (let i = 1; i < 13; i++) {
     const x = margin + (i * anchoCelda);
     doc.moveTo(x, inicioGrid)
@@ -538,50 +506,28 @@ yPos += 15; // Reducido de 20
        .stroke();
   }
 
+  // ✅ SOLO NÚMEROS (sin fechas ni montos)
   for (let i = 0; i < 13; i++) {
     const numero = i + 1;
     const x = margin + (i * anchoCelda);
-    const pago = pagos.find(p => p.numeroPago === numero);
 
-    if (conDatos && numero <= 12 && pago && pago.pagado) {
-      doc.rect(x + 1, inicioGrid + 1, anchoCelda - 2, altoCelda - 2)
-         .fillAndStroke('#e8f5e8', '#000');
-    }
-
-    doc.fontSize(7)
+    doc.fontSize(9)
        .fillColor('#000')
        .font('Helvetica-Bold')
-       .text(numero.toString(), x + 2, inicioGrid + 3, {
+       .text(numero.toString(), x + 2, inicioGrid + 10, {
          width: anchoCelda - 4,
          align: 'center'
        });
-
-    if (conDatos && numero <= 12 && pago) {
-      const fecha = new Date(pago.fechaVencimiento);
-      const fechaTexto = `${fecha.getDate().toString().padStart(2, '0')}/${(fecha.getMonth() + 1).toString().padStart(2, '0')}`;
-      
-      doc.fontSize(6)
-         .font('Helvetica')
-         .text(fechaTexto, x + 2, inicioGrid + 13, {
-           width: anchoCelda - 4,
-           align: 'center'
-         });
-
-      doc.fontSize(6)
-         .text(`$${pago.monto.toFixed(0)}`, x + 2, inicioGrid + 21, {
-           width: anchoCelda - 4,
-           align: 'center'
-         });
-    }
   }
 
-  // Segunda fila y resumen (resto del código...)
+  // Segunda fila (números 14-26)
   yPos = inicioGrid + altoCelda + 8;
 
   doc.rect(margin, yPos, contentWidth, altoCelda)
      .strokeColor('#000')
      .stroke();
 
+  // Líneas verticales
   for (let i = 1; i < 13; i++) {
     const x = margin + (i * anchoCelda);
     doc.moveTo(x, yPos)
@@ -589,11 +535,12 @@ yPos += 15; // Reducido de 20
        .stroke();
   }
 
+  // ✅ SOLO NÚMEROS (sin datos)
   for (let i = 0; i < 13; i++) {
     const numero = i + 14;
     const x = margin + (i * anchoCelda);
 
-    doc.fontSize(7)
+    doc.fontSize(9)
        .fillColor('#000')
        .font('Helvetica-Bold')
        .text(numero.toString(), x + 2, yPos + 10, {
@@ -604,6 +551,7 @@ yPos += 15; // Reducido de 20
 
   yPos += altoCelda + 12;
 
+  // Labels
   doc.fontSize(7)
      .font('Helvetica-Bold')
      .text('PAGOS', margin, yPos);
@@ -616,6 +564,7 @@ yPos += 15; // Reducido de 20
   doc.fontSize(7)
      .text('ABONO', margin, yPos);
 
+  // Resumen (solo en primera tarjeta si quieres)
   if (conDatos) {
     yPos += 20;
     
@@ -638,7 +587,6 @@ yPos += 15; // Reducido de 20
        .text(`Generado: ${new Date().toLocaleDateString('es-ES')}`, margin + 350, yPos);
   }
 }
-
 // Funciones existentes
 export const getTarjetaPago = async (req, res) => {
   try {

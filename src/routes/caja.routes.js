@@ -8,6 +8,8 @@ const router = Router();
 // Crear nueva caja (solo admin)
 router.post('/',  cajaController.crearCaja);
 
+router.get('/historial-detallado', cajaController.getHistorialCajasDetallado);
+
 // Obtener caja actual
 router.get('/actual', cajaController.getCajaActual);
 

@@ -6,6 +6,150 @@ import Prestamo from '../models/Prestamo.js';
 import Pago from '../models/Pago.js';
 import User from '../models/User.js';
 
+
+
+// ✅ HISTORIAL MEJORADO DE CAJAS CON COMPARATIVAS
+export const getHistorialCajasDetallado = async (req, res) => {
+  try {
+    const { año, limit = 12 } = req.query;
+    
+    let filtros = {};
+    if (año) {
+      filtros.año = parseInt(año);
+    }
+    
+    console.log('📚 Obteniendo historial de cajas...');
+    
+    const cajas = await Caja.find(filtros)
+      .populate('creadoPor', 'nombre email')
+      .populate('cerradoPor', 'nombre email')
+      .sort({ año: -1, mes: -1 })
+      .limit(parseInt(limit));
+    
+    // Obtener estadísticas detalladas de cada caja
+    const historialDetallado = await Promise.all(
+      cajas.map(async (caja) => {
+        const balance = caja.obtenerBalance();
+        
+        // Contar asignaciones de esta caja
+        const asignaciones = await AsignacionDinero.find({ caja: caja._id });
+        const asignacionesCompletadas = asignaciones.filter(a => a.status === 'completado');
+        
+        // Contar préstamos del mes
+        const inicioMes = new Date(caja.año, caja.mes - 1, 1);
+        const finMes = new Date(caja.año, caja.mes, 0, 23, 59, 59);
+        
+        const prestamosDelMes = await Prestamo.countDocuments({
+          fechaIngreso: { $gte: inicioMes, $lte: finMes }
+        });
+        
+        const pagosDelMes = await Pago.countDocuments({
+          fechaPago: { $gte: inicioMes, $lte: finMes }
+        });
+        
+        return {
+          id: caja._id,
+          periodo: caja.periodo,
+          mes: caja.mes,
+          año: caja.año,
+          status: caja.status,
+          
+          // 💰 Información financiera
+          financiero: {
+            montoInicial: caja.montoInicial,
+            montoFinal: caja.montoActual,
+            ganancia: balance.ganancia,
+            porcentajeGanancia: balance.porcentajeGanancia,
+            montoAsignado: caja.montoAsignado,
+            montoRecaudado: caja.montoRecaudado,
+            montoPrestado: caja.montoPrestado
+          },
+          
+          // 📊 Actividad
+          actividad: {
+            totalMovimientos: caja.movimientos?.length || 0,
+            asignaciones: asignaciones.length,
+            asignacionesCompletadas: asignacionesCompletadas.length,
+            prestamosCreados: prestamosDelMes,
+            pagosCobrados: pagosDelMes
+          },
+          
+          // 📅 Fechas
+          fechas: {
+            creacion: caja.createdAt,
+            cierre: caja.fechaCierre,
+            diasOperados: caja.fechaCierre ? 
+              Math.ceil((new Date(caja.fechaCierre) - new Date(caja.createdAt)) / (1000 * 60 * 60 * 24)) : 
+              null
+          },
+          
+          // 👥 Usuarios
+          usuarios: {
+            creadoPor: caja.creadoPor?.nombre || 'N/A',
+            cerradoPor: caja.cerradoPor?.nombre || 'N/A'
+          }
+        };
+      })
+    );
+    
+    // 📈 COMPARATIVA ENTRE MESES
+    const comparativa = [];
+    for (let i = 0; i < historialDetallado.length - 1; i++) {
+      const actual = historialDetallado[i];
+      const anterior = historialDetallado[i + 1];
+      
+      comparativa.push({
+        periodoActual: actual.periodo,
+        periodoAnterior: anterior.periodo,
+        diferencias: {
+          ganancia: actual.financiero.ganancia - anterior.financiero.ganancia,
+          porcentajeGanancia: actual.financiero.porcentajeGanancia - anterior.financiero.porcentajeGanancia,
+          prestamos: actual.actividad.prestamosCreados - anterior.actividad.prestamosCreados,
+          pagos: actual.actividad.pagosCobrados - anterior.actividad.pagosCobrados
+        },
+        tendencia: {
+          ganancia: actual.financiero.ganancia > anterior.financiero.ganancia ? 'subida' : 'bajada',
+          actividad: actual.actividad.totalMovimientos > anterior.actividad.totalMovimientos ? 'más activo' : 'menos activo'
+        }
+      });
+    }
+    
+    // 📊 RESUMEN GENERAL
+    const resumenGeneral = {
+      totalCajas: historialDetallado.length,
+      cajasAbiertas: historialDetallado.filter(c => c.status === 'abierta').length,
+      cajasCerradas: historialDetallado.filter(c => c.status === 'cerrada').length,
+      gananciaTotalAcumulada: historialDetallado.reduce((sum, c) => sum + c.financiero.ganancia, 0),
+      promedioGananciaMensual: historialDetallado.length > 0 ? 
+        historialDetallado.reduce((sum, c) => sum + c.financiero.ganancia, 0) / historialDetallado.length : 0,
+      mejorMes: historialDetallado.length > 0 ? 
+        historialDetallado.reduce((max, c) => c.financiero.ganancia > max.financiero.ganancia ? c : max) : null,
+      peorMes: historialDetallado.length > 0 ? 
+        historialDetallado.reduce((min, c) => c.financiero.ganancia < min.financiero.ganancia ? c : min) : null
+    };
+    
+    console.log('✅ Historial generado con', historialDetallado.length, 'cajas');
+    
+    res.json({
+      success: true,
+      historial: historialDetallado,
+      comparativa,
+      resumen: resumenGeneral,
+      filtros: { año: año || 'Todos', limit }
+    });
+    
+  } catch (error) {
+    console.error('❌ Error al obtener historial:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Error al obtener historial de cajas',
+      error: error.message 
+    });
+  }
+};
+
+
+
 // ============ NUEVO MÉTODO: CIERRE DIARIO ============
 
 export const cerrarDiaTrabajador = async (req, res) => {
@@ -1408,34 +1552,32 @@ export const getDashboardTrabajador = async (req, res) => {
     const finDia = new Date(hoy);
     finDia.setHours(23, 59, 59, 999);
     
-    console.log('📅 Buscando asignación para el día:', hoy.toISOString().split('T')[0]);
-    
-    // Buscar asignación del día (PRIORIZAR ASIGNACIONES ACTIVAS)
     console.log('📅 Buscando asignación activa para el día:', hoy.toISOString().split('T')[0]);
     
-    // PRIMERO: Buscar asignaciones activas (pendiente o parcial)
+    // ✅ SOLO BUSCAR ASIGNACIONES ACTIVAS (NO COMPLETADAS)
     let asignacionHoy = await AsignacionDinero.findOne({
       trabajador: trabajadorId,
       fecha: { $gte: hoy, $lte: finDia },
-      status: { $in: ['pendiente', 'parcial'] } // ⭐ SOLO ASIGNACIONES ACTIVAS
+      status: { $in: ['pendiente', 'parcial'] } // ✅ SOLO ACTIVAS
     })
     .populate('caja')
     .populate('trabajador')
     .sort({ createdAt: -1 }); // La más reciente primero
     
-    // SEGUNDO: Si no hay activas, buscar la más reciente (aunque esté completada)
-    if (!asignacionHoy) {
-      console.log('🔍 No hay asignaciones activas, buscando la más reciente...');
-      asignacionHoy = await AsignacionDinero.findOne({
-        trabajador: trabajadorId,
-        fecha: { $gte: hoy, $lte: finDia }
-      })
-      .populate('caja')
-      .populate('trabajador')
-      .sort({ createdAt: -1 }); // La más reciente primero
-    }
+    // ❌ ELIMINAR ESTA PARTE - NO BUSCAR COMPLETADAS
+    // if (!asignacionHoy) {
+    //   console.log('🔍 No hay asignaciones activas, buscando la más reciente...');
+    //   asignacionHoy = await AsignacionDinero.findOne({
+    //     trabajador: trabajadorId,
+    //     fecha: { $gte: hoy, $lte: finDia }
+    //   })
+    //   .populate('caja')
+    //   .populate('trabajador')
+    //   .sort({ createdAt: -1 });
+    // }
     
-    console.log('💰 Asignación encontrada:', asignacionHoy ? 'Sí' : 'No');
+    console.log('💰 Asignación activa encontrada:', asignacionHoy ? 'Sí' : 'No');
+    
     if (asignacionHoy) {
       console.log('📦 Caja asociada:', asignacionHoy.caja ? asignacionHoy.caja.periodo : 'NO TIENE CAJA');
       console.log('📊 Status asignación:', asignacionHoy.status);
@@ -1448,12 +1590,7 @@ export const getDashboardTrabajador = async (req, res) => {
       status: 'abierta'
     });
     
-    // Si hay asignación, usar su caja, si no, usar la caja actual
-    const cajaParaMostrar = asignacionHoy?.caja || cajaActual;
-    
-    console.log('🏦 Caja para mostrar:', cajaParaMostrar ? cajaParaMostrar.periodo : 'Ninguna');
-    
-    // Si no hay asignación, devolver estructura mínima
+    // ✅ SI NO HAY ASIGNACIÓN ACTIVA, RETORNAR INMEDIATAMENTE
     if (!asignacionHoy) {
       return res.json({
         tieneAsignacion: false,
@@ -1462,11 +1599,16 @@ export const getDashboardTrabajador = async (req, res) => {
           _id: trabajador._id,
           nombreCompleto: trabajador.nombreCompleto
         },
-        fecha: hoy.toISOString()
+        fecha: hoy.toISOString(),
+        caja: cajaActual ? {
+          _id: cajaActual._id,
+          periodo: cajaActual.periodo,
+          status: cajaActual.status
+        } : null
       });
     }
     
-    // Obtener actividad del día
+    // Obtener actividad del día SOLO de asignación activa
     const prestamosCreados = await Prestamo.find({
       trabajadorAsignado: trabajadorId,
       fechaIngreso: { $gte: hoy, $lte: finDia }
@@ -1480,16 +1622,17 @@ export const getDashboardTrabajador = async (req, res) => {
     const totalPrestamos = prestamosCreados.reduce((sum, p) => sum + p.monto, 0);
     const totalCobros = pagosRealizados.reduce((sum, p) => sum + p.montoAbonado, 0);
     
-    // ⭐ ESTRUCTURA COMPATIBLE CON EL FRONTEND
+    const cajaParaMostrar = asignacionHoy.caja || cajaActual;
+    
+    // ✅ RESPUESTA CON DATOS DE ASIGNACIÓN ACTIVA
     const response = {
-      tieneAsignacion: true, // ← Campo que busca el frontend
+      tieneAsignacion: true,
       trabajador: {
         _id: trabajador._id,
         nombreCompleto: trabajador.nombreCompleto
       },
       fecha: hoy.toISOString(),
       
-      // ⭐ Estructura que espera el frontend para la caja
       caja: {
         _id: cajaParaMostrar._id,
         periodo: cajaParaMostrar.periodo,
@@ -1504,7 +1647,6 @@ export const getDashboardTrabajador = async (req, res) => {
         }
       },
       
-      // ⭐ Campo que busca el frontend (status, no estados)
       status: {
         puedeCrearPrestamos: asignacionHoy.status !== 'completado' && 
                             (asignacionHoy.montoAsignado - asignacionHoy.montoUtilizado) > 0,
@@ -1512,7 +1654,6 @@ export const getDashboardTrabajador = async (req, res) => {
         requiereCierre: asignacionHoy.status === 'pendiente' || asignacionHoy.status === 'parcial'
       },
       
-      // ⭐ Estructura que espera el frontend para actividad
       actividad: {
         prestamosCreados: {
           cantidad: prestamosCreados.length,
@@ -1524,7 +1665,6 @@ export const getDashboardTrabajador = async (req, res) => {
         }
       },
       
-      // Info adicional para debugging
       debug: {
         asignacionId: asignacionHoy._id,
         statusAsignacion: asignacionHoy.status,
@@ -1533,10 +1673,7 @@ export const getDashboardTrabajador = async (req, res) => {
     };
     
     console.log('✅ Dashboard generado exitosamente');
-    console.log('🔍 Respuesta completa del dashboard:', response);
-    console.log('🔍 tieneAsignacion:', response.tieneAsignacion);
-    console.log('🔍 Caja balance:', response.caja.balance);
-    console.log('🔍 Status:', response.status);
+    console.log('🔍 Status asignación:', asignacionHoy.status);
     
     res.json(response);
     
@@ -1550,7 +1687,6 @@ export const getDashboardTrabajador = async (req, res) => {
   }
 };
 
-// 3. RESUMEN PARA CIERRE DIARIO
 export const getResumenCierreDiario = async (req, res) => {
   try {
     const { trabajadorId } = req.params;
@@ -1561,20 +1697,23 @@ export const getResumenCierreDiario = async (req, res) => {
     const finDia = new Date(fechaCierre);
     finDia.setHours(23, 59, 59, 999);
 
+    // ✅ BUSCAR SOLO ASIGNACIONES ACTIVAS
     const asignacion = await AsignacionDinero.findOne({
       trabajador: trabajadorId,
-      fecha: { $gte: fechaCierre, $lte: finDia }
-    }).populate('trabajador', 'nombreCompleto');
+      fecha: { $gte: fechaCierre, $lte: finDia },
+      status: { $in: ['pendiente', 'parcial'] } // ✅ SOLO ACTIVAS
+    })
+    .populate('trabajador', 'nombreCompleto')
+    .sort({ createdAt: -1 }); // La más reciente
 
     if (!asignacion) {
       return res.status(404).json({ 
-        message: 'No se encontró asignación para cerrar' 
+        message: 'No se encontró asignación activa para cerrar' 
       });
     }
 
     const balance = asignacion.calcularBalance();
     
-    // ✅ CÁLCULO CORRECTO
     const montoDisponible = asignacion.montoAsignado - asignacion.montoUtilizado;
     const montoEsperado = montoDisponible + asignacion.montoRecaudado;
 
@@ -1582,14 +1721,15 @@ export const getResumenCierreDiario = async (req, res) => {
       asignacion: {
         id: asignacion._id,
         trabajador: asignacion.trabajador.nombreCompleto,
-        fecha: fechaCierre
+        fecha: fechaCierre,
+        status: asignacion.status // ✅ AGREGAR
       },
       resumen: {
         montoAsignado: asignacion.montoAsignado,
         montoUtilizado: asignacion.montoUtilizado,
-        montoDisponible: montoDisponible, // ✅ AGREGADO
+        montoDisponible: montoDisponible,
         montoRecaudado: asignacion.montoRecaudado,
-        montoEsperadoDevolucion: montoEsperado, // ✅ CORREGIDO
+        montoEsperadoDevolucion: montoEsperado,
         gananciaGenerada: asignacion.montoRecaudado,
         prestamosRealizados: balance.prestamosRealizados,
         cobrosRealizados: balance.cobrosRealizados
@@ -1600,7 +1740,8 @@ export const getResumenCierreDiario = async (req, res) => {
       },
       validaciones: {
         puedeCrear: asignacion.status !== 'completado',
-        tieneMovimientos: balance.prestamosRealizados > 0 || balance.cobrosRealizados > 0
+        tieneMovimientos: balance.prestamosRealizados > 0 || balance.cobrosRealizados > 0,
+        esAsignacionActiva: true // ✅ AGREGAR FLAG
       }
     });
   } catch (error) {

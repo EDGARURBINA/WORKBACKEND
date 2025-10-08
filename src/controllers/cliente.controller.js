@@ -350,7 +350,7 @@ export const getResumenCliente = async (req, res) => {
   }
 };
 
-// Métodos existentes (mantener)
+
 
 // Crear nuevo cliente con aval
 export const createCliente = async (req, res) => {
@@ -358,7 +358,7 @@ export const createCliente = async (req, res) => {
     const { cliente, aval } = req.body;
 
     // Validaciones básicas
-    if (!cliente.nombre || !cliente.telefono || !cliente.direccion) {
+    if (!cliente.nombre || !cliente.telefono || !cliente.direccion ||!cliente.ubicacion ) {
       return res.status(400).json({ 
         message: 'Nombre, teléfono y dirección del cliente son requeridos' 
       });

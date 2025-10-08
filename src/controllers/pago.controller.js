@@ -16,7 +16,10 @@ export const registrarAbono = async (req, res) => {
       });
     }
 
-    if (!montoAbonado || montoAbonado <= 0) {
+    // ✅ REDONDEAR MONTO DESDE EL INICIO
+    const montoRedondeado = Math.round(parseFloat(montoAbonado) * 100) / 100;
+
+    if (!montoRedondeado || montoRedondeado <= 0) {
       return res.status(400).json({ message: 'El monto del abono debe ser mayor a 0' });
     }
 
@@ -49,7 +52,7 @@ export const registrarAbono = async (req, res) => {
       });
     }
 
-    // Tu lógica existente de moratorios...
+    // Lógica de moratorios
     const moratorioAplicado = await Moratorio.findOne({ 
       pago: pagoId, 
       activo: true 
@@ -58,17 +61,20 @@ export const registrarAbono = async (req, res) => {
     let moratorioEfectivo = 0;
     
     if (moratorioAplicado && !moratorioAplicado.adminAcciones?.noCobra) {
-      moratorioEfectivo = moratorioAplicado.monto;
+      // ✅ REDONDEAR MORATORIO
+      moratorioEfectivo = Math.round(moratorioAplicado.monto * 100) / 100;
       pago.diasMoratorio = moratorioAplicado.dias;
-      pago.montoMoratorio = moratorioAplicado.monto;
+      pago.montoMoratorio = moratorioEfectivo;
     } else {
       pago.diasMoratorio = 0;
       pago.montoMoratorio = 0;
     }
 
-    const saldoTotal = pago.saldoPendiente + moratorioEfectivo;
+    // ✅ REDONDEAR SALDO TOTAL
+    const saldoTotal = Math.round((pago.saldoPendiente + moratorioEfectivo) * 100) / 100;
     
-    if (montoAbonado > saldoTotal) {
+    // ✅ COMPARACIÓN CON TOLERANCIA PARA DECIMALES (1 centavo)
+    if (montoRedondeado > saldoTotal + 0.01) {
       return res.status(400).json({ 
         message: `El abono no puede ser mayor al saldo pendiente ($${saldoTotal.toFixed(2)})` 
       });
@@ -80,41 +86,48 @@ export const registrarAbono = async (req, res) => {
     try {
       await asignacionActiva.registrarCobro(
         pagoId,
-        parseFloat(montoAbonado),
+        montoRedondeado, // ✅ Usar monto redondeado
         pago.prestamo.cliente
       );
       
-      console.log(`💰 Cobro de $${montoAbonado} registrado en caja para trabajador ${trabajadorId}`);
+      console.log(`💰 Cobro de $${montoRedondeado.toFixed(2)} registrado en caja para trabajador ${trabajadorId}`);
     } catch (error) {
       console.error('❌ Error al registrar cobro en caja:', error);
       throw new Error('Error al procesar el cobro en la caja');
     }
 
-    // Tu lógica existente de aplicar el abono...
-    let montoRestante = montoAbonado;
+    // ✅ APLICAR ABONO CON REDONDEO
+    let montoRestante = montoRedondeado;
     let abonoCapital = 0;
     let abonoMoratorio = 0;
 
     if (moratorioEfectivo > 0) {
       abonoMoratorio = Math.min(montoRestante, moratorioEfectivo);
+      // ✅ REDONDEAR ABONO A MORATORIO
+      abonoMoratorio = Math.round(abonoMoratorio * 100) / 100;
       
-      const nuevoMontoMoratorio = moratorioAplicado.monto - abonoMoratorio;
+      // ✅ REDONDEAR NUEVO MONTO DE MORATORIO
+      const nuevoMontoMoratorio = Math.round((moratorioAplicado.monto - abonoMoratorio) * 100) / 100;
       await Moratorio.findByIdAndUpdate(moratorioAplicado._id, {
         monto: nuevoMontoMoratorio
       });
       
       pago.montoMoratorio = nuevoMontoMoratorio;
-      montoRestante -= abonoMoratorio;
+      // ✅ REDONDEAR MONTO RESTANTE
+      montoRestante = Math.round((montoRestante - abonoMoratorio) * 100) / 100;
     }
 
     if (montoRestante > 0) {
       abonoCapital = Math.min(montoRestante, pago.saldoPendiente);
-      pago.montoAbonado += abonoCapital;
+      // ✅ REDONDEAR ABONO A CAPITAL
+      abonoCapital = Math.round(abonoCapital * 100) / 100;
+      // ✅ REDONDEAR MONTO ABONADO TOTAL
+      pago.montoAbonado = Math.round((pago.montoAbonado + abonoCapital) * 100) / 100;
     }
 
     // Agregar al historial de abonos
     pago.historialAbonos.push({
-      monto: montoAbonado,
+      monto: montoRedondeado, // ✅ Usar monto redondeado
       fecha: fechaActual,
       trabajador: trabajadorId,
       observaciones: observaciones || `Abono: $${abonoCapital.toFixed(2)} capital${abonoMoratorio > 0 ? `, $${abonoMoratorio.toFixed(2)} moratorio` : ''}`
@@ -131,7 +144,7 @@ export const registrarAbono = async (req, res) => {
 
     await pago.save();
 
-    // Tu lógica existente de línea de crédito...
+    // Lógica de línea de crédito
     if (pago.numeroPago >= pago.prestamo.pagoMinimoRenovacion && 
         pago.pagado && 
         !pago.prestamo.puedeRenovar) {
@@ -152,21 +165,22 @@ export const registrarAbono = async (req, res) => {
       });
     }
 
+    // ✅ RESPONSE CON VALORES REDONDEADOS A 2 DECIMALES
     const response = {
       message: pago.pagado 
         ? 'Pago completado correctamente' 
         : `Abono registrado. Saldo pendiente: $${pago.saldoPendiente.toFixed(2)}`,
       pago,
       detalleAbono: {
-        montoTotal: montoAbonado,
-        abonoCapital,
-        abonoMoratorio,
+        montoTotal: montoRedondeado.toFixed(2),
+        abonoCapital: abonoCapital.toFixed(2),
+        abonoMoratorio: abonoMoratorio.toFixed(2),
         nuevoEstado: pago.estadoPago
       },
       caja: {
         registrado: true,
         mensaje: 'Cobro registrado en tu asignación de caja',
-        montoRecaudadoHoy: asignacionActiva.montoRecaudado,
+        montoRecaudadoHoy: asignacionActiva.montoRecaudado.toFixed(2),
         asignacionId: asignacionActiva._id
       }
     };
